@@ -14,14 +14,15 @@
 
 #define DEBUG false //Remove to activate serial prints 
 #define SENSOR_PIN D4
-#define SSR_PIN D6
+#define SSR_COOL_PIN D6
+#define SSR_HEAT_PIN D7
 
 // Change the credentials below, so your ESP8266 connects to your router
 const char* ssid = STASSID;
 const char* password = STAPSK;
 
 // Change the variable to your Raspberry Pi IP address, so it connects to your MQTT broker
-const char* mqtt_server = "192.168.1.12";
+const char* mqtt_server = "192.168.1.27";
 // Initializes the espClient. You should change the espClient name if you have multiple ESPs running in your home automation system
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -34,9 +35,10 @@ bool cooling = false;
 
 //PID settings
 double temp_now, Output, Setpoint;
-double Kp = 250, Ki = 10, Kd = 0;
-
-PID coolingPID(&temp_now, &Output, &Setpoint, Kp, Ki, Kd, REVERSE);  //PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
+double cool_Kp = 250, cool_Ki = 10, cool_Kd = 0;
+PID coolingPID(&temp_now, &Output, &Setpoint, cool_Kp, cool_Ki, cool_Kd, REVERSE);  //PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
+double heat_Kp = 150, heat_Ki = 15, heat_Kd = 0;
+PID heatingPID(&temp_now, &Output, &Setpoint, heat_Kp, heat_Ki, heat_Kd, DIRECT);  //PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
 int WindowSize = 20000;
 unsigned long windowStartTime;
 
@@ -157,10 +159,10 @@ void callback(String topic, byte* message, unsigned int length) {
       }
       /*Serial.print("Changing Peltier State to ");
         if(messageTemp == "on"){
-        digitalWrite(SSR_PIN, HIGH);
+        digitalWrite(SSR_COOL_PIN, HIGH);
         }
         else if(messageTemp == "off"){
-        digitalWrite(SSR_PIN, LOW);
+        digitalWrite(SSR_COOL_PIN, LOW);
         }
         Serial.print("messageTemp: ");Serial.println(messageTemp);*/
     }
@@ -208,17 +210,36 @@ void reconnect() {
 void temp_control() {
   if (now - lastMeasure > 5000) {
       lastMeasure = now;
-      coolingPID.Compute();   //  turn the output pin on/off based on pid output
-  
+      if(temp_now >= Setpoint-1)
+      {
+        coolingPID.Compute();
+      }   //  turn the output pin on/off based on pid output
+      else
+      {
+        heatingPID.Compute();
+      }
+      
   if(DEBUG){Serial.print("Output: ");Serial.println(Output);}
-  now = millis();
-  if (now - windowStartTime > WindowSize)
-  {
-    windowStartTime = millis(); //time to shift the Relay Window
+  if(temp_now >= Setpoint-1){
+    now = millis();
+    if (now - windowStartTime > WindowSize)
+    {
+      windowStartTime = millis(); //time to shift the Relay Window
+    }
+    else if (Output > now - windowStartTime) digitalWrite(SSR_COOL_PIN, HIGH);
+    else digitalWrite(SSR_COOL_PIN, LOW);
+    }
+    else{
+    now = millis();
+    if (now - windowStartTime > WindowSize)
+    {
+      windowStartTime = millis(); //time to shift the Relay Window
+    }
+    else if (Output > now - windowStartTime) digitalWrite(SSR_HEAT_PIN, HIGH);
+    else digitalWrite(SSR_HEAT_PIN, LOW);
+    }
   }
-  else if (Output > now - windowStartTime) digitalWrite(SSR_PIN, HIGH);
-  else digitalWrite(SSR_PIN, LOW);
-  }
+  
 }
 
 void temp_acquisition() {
@@ -253,8 +274,11 @@ void temp_acquisition() {
   // Sets your mqtt broker and sets the callback function
   // The callback function is what receives messages and actually controls the LEDs
   void setup() {
-    pinMode(SSR_PIN, OUTPUT);
-    digitalWrite(SSR_PIN,HIGH);
+    pinMode(SSR_COOL_PIN, OUTPUT);
+    digitalWrite(SSR_COOL_PIN,HIGH);
+    
+    pinMode(SSR_HEAT_PIN, OUTPUT);
+    digitalWrite(SSR_HEAT_PIN,HIGH);
     sensors.begin();
 
     if(DEBUG){Serial.begin(115200);}
@@ -267,6 +291,10 @@ void temp_acquisition() {
     coolingPID.SetOutputLimits(0, WindowSize);   //tell the PID to range between 0 and the full window size
     coolingPID.SetMode(AUTOMATIC);  //turn the PID on
     coolingPID.SetSampleTime(5000);
+    
+    heatingPID.SetOutputLimits(0, WindowSize);   //tell the PID to range between 0 and the full window size
+    heatingPID.SetMode(AUTOMATIC);  //turn the PID on
+    heatingPID.SetSampleTime(5000);
   }
 
   // For this project, you don't need to change anything in the loop function. Basically it ensures that you ESP is connected to your broker
@@ -285,7 +313,8 @@ void temp_acquisition() {
     if (cooling)
             temp_control();
     else
-      digitalWrite(SSR_PIN,LOW);    
+      digitalWrite(SSR_COOL_PIN,LOW);
+      digitalWrite(SSR_HEAT_PIN,LOW);
 
     ArduinoOTA.handle();
   }
