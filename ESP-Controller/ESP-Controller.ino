@@ -37,7 +37,7 @@ bool cooling = false;
 double temp_now, Output, Setpoint;
 double cool_Kp = 250, cool_Ki = 10, cool_Kd = 0;
 PID coolingPID(&temp_now, &Output, &Setpoint, cool_Kp, cool_Ki, cool_Kd, REVERSE);  //PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
-double heat_Kp = 150, heat_Ki = 15, heat_Kd = 0;
+double heat_Kp = 125, heat_Ki = 10, heat_Kd = 0;
 PID heatingPID(&temp_now, &Output, &Setpoint, heat_Kp, heat_Ki, heat_Kd, DIRECT);  //PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, Direction)
 int WindowSize = 20000;
 unsigned long windowStartTime;
@@ -137,9 +137,10 @@ void callback(String topic, byte* message, unsigned int length) {
       else
         client.publish("homebrewer/connection", "false");
     }
-    else if (messageTemp == "true") {
+    else if (messageTemp =="connect"){
       node_red_connection = true;
       client.publish("homebrewer/connection", "true");
+      if(DEBUG){Serial.println("Connection true from node-red");}
     }
     else if (messageTemp == "disconnect") {
       if(DEBUG){Serial.println("Closed connection, waiting for new one");}
@@ -208,14 +209,16 @@ void reconnect() {
 }
 
 void temp_control() {
-  if (now - lastMeasure > 5000) {
-      lastMeasure = now;
+  if (millis() - lastMeasure > 5000) {
+      lastMeasure = millis();
       if(temp_now >= Setpoint-1)
       {
+        if(DEBUG)Serial.println("cooling PID compute");
         coolingPID.Compute();
       }   //  turn the output pin on/off based on pid output
       else
       {
+        if(DEBUG)Serial.println("heating PID compute");
         heatingPID.Compute();
       }
       
@@ -312,9 +315,9 @@ void temp_acquisition() {
     }
     if (cooling)
             temp_control();
-    else
+    else{
       digitalWrite(SSR_COOL_PIN,LOW);
       digitalWrite(SSR_HEAT_PIN,LOW);
-
+    }
     ArduinoOTA.handle();
   }
